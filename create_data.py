@@ -14,11 +14,46 @@ from lasagne.nonlinearities import *
 from lasagne.updates import *
 from lasagne.utils import *
 
+import itertools
 
 ################
 # data loading #
 ################
 
+def load_movielens10m_matrix_new():
+    data_dir = "data/movielens10m"
+    ratings = np.load("%s/movielens10m.pkl_01.npy" % data_dir)
+    movies = np.load("%s/movielens10m.pkl_02.npy" % data_dir)
+    users = np.load("%s/movielens10m.pkl_03.npy" % data_dir)
+    # randomly shuffle
+    idxs = [x for x in range(0, len(ratings))]
+    np.random.shuffle(idxs)
+    ratings, movies, users = ratings[idxs], movies[idxs], users[idxs]
+    # determine the size of the matrix
+    tmp = csr_matrix((ratings, (users, movies)))
+    n_users, n_items = tmp.shape
+    # split into X_train, X_valid, X_test
+    X_train = csr_matrix(
+        (ratings[0:int(0.8*len(ratings))], (users[0:int(0.8*len(users))], movies[0:int(0.8*len(movies))])), 
+        shape=(n_users, n_items)
+    )
+    print "X_train = ", X_train.shape
+    X_valid = csr_matrix(
+        (ratings[int(0.8*len(ratings)):int(0.9*len(ratings))], (users[int(0.8*len(users)):int(0.9*len(users))], movies[int(0.8*len(movies)):int(0.9*len(movies))])), 
+        shape=(n_users, n_items)
+    )
+    print "X_valid = ", X_valid.shape
+    X_test = csr_matrix(
+        (ratings[int(0.9*len(ratings))::], (users[int(0.9*len(users))::], movies[int(0.9*len(movies))::])), 
+        shape=(n_users, n_items)
+    )
+    print "X_test = ", X_test.shape
+    return X_train, X_valid, X_test
+
+# -----------
+
+## LEGACY
+"""
 def load_movielens10m_matrix():
     data_dir = "data/movielens10m"
     ratings = np.load("%s/movielens10m.pkl_01.npy" % data_dir)
@@ -26,6 +61,26 @@ def load_movielens10m_matrix():
     users = np.load("%s/movielens10m.pkl_03.npy" % data_dir)
     tmp = csr_matrix((ratings, (users, movies)))
     return tmp
+
+## LEGACY
+def prep_data(transpose=False):
+    # load in the data, then shuffle it randomly
+    X = load_movielens10m_matrix()
+    idxs = [x for x in range(0, X.shape[0])]
+    X = X[idxs]
+    if transpose:
+        X = X.T
+    # split into train set, valid set, and test set
+    n = X.shape[0]
+    X_train, X_valid, X_test = X[0:int(0.8*n)], X[int(0.8*n):int(0.9*n)], X[int(0.9*n)::]
+    print "X_train = ", X_train.shape
+    print "X_valid = ", X_valid.shape
+    print "X_test = ", X_test.shape
+    return X_train, X_valid, X_test
+"""
+
+def select_nonzero_rows(tmp):
+    return ~np.all(np.equal(tmp, 0), axis=1)
 
 def iterator(mat, bs=32, mean_centering=False, shuffle=False):
     if shuffle:
@@ -40,6 +95,12 @@ def iterator(mat, bs=32, mean_centering=False, shuffle=False):
             this_batch = mat[(b*bs)::].todense().astype("float32")
         else:
             this_batch = mat[b*bs:(b+1)*bs].todense().astype("float32")
+
+        #pdb.set_trace()
+        
+        # check: make sure this_batch has no all-zero rows
+        this_batch = this_batch[ np.asarray(select_nonzero_rows(this_batch))[:,0] ]
+            
         if mean_centering:
             for i in range(0, this_batch.shape[0]):
                 row = this_batch[i]
@@ -47,25 +108,34 @@ def iterator(mat, bs=32, mean_centering=False, shuffle=False):
                 row_mean = np.sum(row) / ((row != 0).sum()+1)
                 row = row - row_mean
                 this_batch[i] = row
-        yield this_batch, (this_batch != 0).astype("float32")
-        b += 1
 
-def prep_data(mean_center=False):
-    # load in the data, then shuffle it randomly
-    X = load_movielens10m_matrix()
-    idxs = [x for x in range(0, X.shape[0])]
-    X = X[idxs]
-    # split into train set, valid set, and test set
-    n = X.shape[0]
-    X_train, X_valid, X_test = X[0:int(0.8*n)], X[int(0.8*n):int(0.9*n)], X[int(0.9*n)::]
-    return X_train, X_valid, X_test
+        # if the minibatch is all-zeros, just continue the iterator
+        if this_batch.shape[0] != 0:
+            yield this_batch, (this_batch != 0).astype("float32")
+        b += 1
 
 ####################
 # lasagne networks #
 ####################
 
+def i_encoder1_tieing(args):
+    return _encoder1_tieing(n_items=65133, args=args)
+
 def i_encoder1(args):
-    n_items = 65133
+    return _encoder1(n_items=65133, args=args)
+
+def u_encoder1(args):
+    return _encoder1(n_items=71567, args=args)
+
+def i_simple_net(args):
+    return _simple_net(n_items=65133, args=args)
+
+def u_simple_net(args):
+    return _simple_net(n_items=71567, args=args)
+
+# u/i agnostic implementations
+
+def _encoder1_tieing(n_items, args):
     l_in = InputLayer((None, n_items))
     l_dense = DenseLayer(l_in, num_units=args["bottleneck"])
     l_dense2 = DenseLayer(l_dense, num_units=args["code"])
@@ -76,21 +146,22 @@ def i_encoder1(args):
         l_inv = InverseLayer(l_inv, layer)
     return l_inv
 
-def i_encoder1_no_tieing(args):
-    n_items = 65133
+def _encoder1(n_items, args):
     l_in = InputLayer((None, n_items))
     l_dense = DenseLayer(l_in, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"])
     l_dense2 = DenseLayer(l_dense, num_units=args["code"], nonlinearity=args["nonlinearity"])
     l_inv = DenseLayer(l_dense2, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"])
-    l_inv = DenseLayer(l_inv, num_units=n_items, nonlinearity=args["nonlinearity"])
-    return l_inv
+    l_inv2 = DenseLayer(l_inv, num_units=n_items, nonlinearity=linear)
+    return l_inv2
 
-def simple_net(args):
-    n_items = 65133
+
+def _simple_net(n_items, args):
     l_in = InputLayer((None, n_items))
     l_dense = DenseLayer(l_in, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"])
     l_inv = DenseLayer(l_dense, num_units=n_items, nonlinearity=linear)
     return l_inv
+
+# --
 
 def simple_net_tieing(args):
     n_items = 65133
@@ -104,30 +175,56 @@ def simple_net_tieing(args):
 # lasagne helper #
 # ################
 
-def get_net(net_fn, args):
+def get_net(net_fns, args):
     print "compiling theano functions..."
-    X = T.fmatrix('X')
-    M = T.fmatrix('M') # mask
-    l_out = net_fn(args)
-    print_network(l_out)
-    net_out = get_output(l_out, X)
-    if "mask" in args:
-        print "masking mode = true"
-        loss = (M*squared_error(net_out, X)).mean()
-    else:
-        loss = squared_error(net_out, X).mean()
-    params = get_all_params(l_out, trainable=True)
+    X_I = T.fmatrix('X_I')
+    X_U = T.fmatrix('X_U')
+    M_I = T.fmatrix('M_I')
+    M_U = T.fmatrix('M_U')
+    # get the item encoder and the user encoder
+    l_out_i, l_out_u = net_fns[0](args), net_fns[1](args)
+    print_network(l_out_i)
+    print_network(l_out_u)
+    net_out_i, net_out_u = get_output(l_out_i, X_I), get_output(l_out_u, X_U)
+    assert args["mode"] in ["item", "user", "item_mask", "user_mask", "both"]
+    if args["mode"] == "item":
+        loss = squared_error(net_out_i, X_I).mean()
+        loss_i, loss_u = loss, T.constant(0.0)
+        params = get_all_params(l_out_i, trainable=True)
+    elif args["mode"] == "user":
+        loss = squared_error(net_out_u, X_U).mean()
+        loss_i, loss_u = T.constant(0.0), loss
+        params = get_all_params(l_out_u, trainable=True)
+    elif args["mode"] == "item_mask":
+        loss = (M*squared_error(net_out_i, X_I)).mean()
+        loss_i, loss_u = loss, T.constant(0.0)        
+        params = get_all_params(l_out_i, trainable=True)
+    elif args["mode"] == "user_mask":
+        loss = (M*squared_error(net_out_u, X_U)).mean()
+        loss_i, loss_u = T.constant(0.0), loss
+        params = get_all_params(l_out_u, trainable=True)
+    elif args["mode"] == "both":
+        loss_i = squared_error(net_out_i, X_I).mean()
+        loss_u = squared_error(net_out_u, X_U).mean()
+        loss = loss_i + loss_u
+        params = get_all_params(l_out_i, trainable=True)
+        params += get_all_params(l_out_u, trainable=True)
+    print "params =", params
     lr = theano.shared(floatX(args["learning_rate"]))
-    updates = nesterov_momentum(loss, params, learning_rate=lr, momentum=0.9)
-    train_fn = theano.function([X,M], loss, updates=updates, on_unused_input='warn')
-    loss_fn = theano.function([X,M], loss, on_unused_input='warn')
-    out_fn = theano.function([X], net_out)
+    if args["optimiser"] == "nesterov_momentum":
+        updates = nesterov_momentum(loss, params, learning_rate=lr, momentum=0.9)
+    elif args["optimiser"] == "adam":
+        updates = adam(loss, params, learning_rate=lr)
+    train_fn = theano.function([X_I,M_I,X_U,M_U], [loss, loss_i, loss_u], updates=updates, on_unused_input='warn')
+    loss_fn = theano.function([X_I,M_I,X_U,M_U], [loss, loss_i, loss_u], on_unused_input='warn')
+    out_fn_i = theano.function([X_I], net_out_i)
+    out_fn_u = theano.function([X_U], net_out_u)
     return {
-        "l_out": l_out,
         "train_fn": train_fn,
         "loss_fn": loss_fn,
         "lr": lr,
-        "out_fn", out_fn
+        "l_out_i": l_out_i,
+        "l_out_u": l_out_u
     }
 
 def print_network(l_out):
@@ -155,13 +252,15 @@ def test(net_cfg, X_test, mean_centering=False):
 
     pass
     
-def train(net_cfg, data, num_epochs, batch_size, out_dir, schedule={}, resume=None, shuffle=False, mean_centering=False, quick_check=False):
+def train(net_cfg, data, num_epochs, batch_size, out_dir, model_dir, schedule={}, resume=None, shuffle=False, mean_centering=False, quick_check=False, debug=False):
     print "training..."
     #pdb.set_trace()
     if not os.path.exists(out_dir):
         os.mkdir(out_dir)
-    headers = ["epoch", "train_loss", "valid_loss", "time"]
-    l_out, train_fn, loss_fn, lr = net_cfg["l_out"], net_cfg["train_fn"], net_cfg["loss_fn"], net_cfg["lr"]
+    if not os.path.exists(model_dir):
+        os.mkdir(model_dir)
+    headers = ["epoch", "train_loss", "train_i_loss", "train_u_loss", "valid_loss", "valid_i_loss", "valid_u_loss", "time"]
+    l_out_i, l_out_u, train_fn, loss_fn, lr = net_cfg["l_out_i"], net_cfg["l_out_u"], net_cfg["train_fn"], net_cfg["loss_fn"], net_cfg["lr"]
     if resume != None:
         write_flag = "ab"
         print "resuming training..."
@@ -181,62 +280,178 @@ def train(net_cfg, data, num_epochs, batch_size, out_dir, schedule={}, resume=No
         if epoch+1 in schedule:
             print "changing learning rate to: %f\n" % schedule[epoch+1]
             lr.set_value( schedule[epoch+1] )
-        train_losses = []
-        for X_batch, X_mask in iterator(X_train, bs=batch_size, shuffle=shuffle, mean_centering=mean_centering):
-            #pdb.set_trace()
-            this_loss = train_fn(X_batch, X_mask)
+        train_losses, train_losses_i, train_losses_u = [], [], []
+        i_iterator = iterator(X_train, bs=batch_size, shuffle=shuffle, mean_centering=mean_centering)
+        u_iterator = iterator(X_train.T, bs=batch_size, shuffle=shuffle, mean_centering=mean_centering)
+        for I_tp, U_tp in itertools.izip(i_iterator, u_iterator):
+            X_batch_I, X_mask_I = I_tp
+            X_batch_U, X_mask_U = U_tp
+            if debug:
+                pdb.set_trace()
+            this_loss, this_loss_i, this_loss_u = train_fn(X_batch_I, X_mask_I, X_batch_U, X_mask_U)
             f_train_raw.write("%f\n" % this_loss); f_train_raw.flush()
             train_losses.append(this_loss)
+            train_losses_i.append(this_loss_i)
+            train_losses_u.append(this_loss_u)
             if quick_check:
                 break
-        avg_train_loss = np.mean(train_losses)
-        valid_losses = []
-        for X_batch, X_mask in iterator(X_valid, bs=batch_size, shuffle=False, mean_centering=mean_centering):
-            this_loss = loss_fn(X_batch, X_mask)
+        avg_train_loss, avg_train_loss_i, avg_train_loss_u = np.mean(train_losses), np.mean(train_losses_i), np.mean(train_losses_u)
+        # TODO: refactor
+        valid_losses, valid_losses_i, valid_losses_u = [], [], []
+        i_iterator = iterator(X_valid, bs=batch_size, shuffle=shuffle, mean_centering=mean_centering)
+        u_iterator = iterator(X_valid.T, bs=batch_size, shuffle=shuffle, mean_centering=mean_centering)
+        for I_tp, U_tp in itertools.izip(i_iterator, u_iterator):
+            X_batch_I, X_mask_I = I_tp
+            X_batch_U, X_mask_U = U_tp
+            this_loss, this_loss_i, this_loss_u = loss_fn(X_batch_I, X_mask_I, X_batch_U, X_mask_U)
             f_valid_raw.write("%f\n" % this_loss); f_valid_raw.flush()
             valid_losses.append(this_loss)
+            valid_losses_i.append(this_loss_i)
+            valid_losses_u.append(this_loss_u)
             if quick_check:
                 break
-        avg_valid_loss = np.mean(valid_losses)
-        out_str = "%i,%f,%f,%f\n" % (epoch+1, avg_train_loss, avg_valid_loss, time()-t0)
+        avg_valid_loss, avg_valid_loss_i, avg_valid_loss_u = np.mean(valid_losses), np.mean(valid_losses_i), np.mean(valid_losses_u)
+        out_str = "%i,%f,%f,%f,%f,%f,%f,%f" % \
+          (epoch+1, avg_train_loss, avg_train_loss_i, avg_train_loss_u, avg_valid_loss, avg_valid_loss_i, avg_valid_loss_u, time()-t0)
         f_clean.write("%s\n" % out_str)
         f_clean.flush()
         print out_str
-        with open("%s/%i.model" % (out_dir, epoch+1), "wb") as g:
-            pickle.dump( get_all_param_values(l_out), g, pickle.HIGHEST_PROTOCOL)
-        
+        with open("%s/%i.model" % (model_dir, epoch+1), "wb") as g:
+            pickle.dump( [ get_all_param_values(l_out_i), get_all_param_values(l_out_u) ], g, pickle.HIGHEST_PROTOCOL)
 
 if __name__ == '__main__':
 
     np.random.seed(0)
 
-    X_train, X_valid, X_test = prep_data()
+    #######################
+    # item-encoder models #
+    # #####################
     
-    print X_train.shape
-    print X_valid.shape
-    print X_test.shape
-
-    #for x_batch in iterator(mat):
-    #    print x_batch.shape
-
-    #net1 = i_encoder1({"bottleneck":200, "code":200})
-    #print_network(net1)
-    
-    #net1_cfg = get_net(simple_net, {"bottleneck":500, "learning_rate":0.1, "nonlinearity":sigmoid})
-    #train(net1_cfg, data=(X_train,X_valid,X_test), num_epochs=10, batch_size=128, shuffle=True, mean_centering=True, out_dir="output/simple_net")
-    
-    #net1_cfg = get_net(simple_net, {"bottleneck":500, "learning_rate":0.01, "nonlinearity":sigmoid})
-    #train(net1_cfg, data=(X_train,X_valid,X_test), num_epochs=10, batch_size=128, shuffle=True, mean_centering=True, out_dir="output/simple_net_lr0.01")
-    
-    #net1_cfg = get_net(simple_net_tieing, {"bottleneck":500, "learning_rate":0.1, "nonlinearity":sigmoid})
-    #train(net1_cfg, data=(X_train,X_valid,X_test), num_epochs=10, batch_size=128, shuffle=True, mean_centering=True, out_dir="output/simple_net_tieing")
-
-    #bottleneck=200
-    for bottleneck in [50, 100, 300, 400, 500]:
-        net1_cfg = get_net(simple_net, {"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid})
-        train(net1_cfg, data=(X_train,X_valid,X_test), num_epochs=10, batch_size=128, shuffle=True, mean_centering=True, out_dir="output/simple_net_c%i" % bottleneck)
-
+    if "C200_C200_ADAM" in os.environ:
+        bottleneck, code = 200, 200
+        net1_cfg = get_net(i_encoder1, {"bottleneck":bottleneck, "code":code, "learning_rate":0.01, "nonlinearity":sigmoid, "optimiser":"adam"})
+        dirname = "i_encoder_c%i_c%i_lr0.01_adam" % (bottleneck, code)
+        train(net1_cfg,
+            data=prep_data(),
+            num_epochs=100,
+            batch_size=128,
+            shuffle=True,
+            mean_centering=True,
+            out_dir="output/%s" % dirname,
+            model_dir="/state/partition3/cbeckham/%s" % dirname,
+            schedule={50: 0.001}
+        )
 
     
+    if "C500_C500" in os.environ:
+        bottleneck, code = 500, 500
+        net1_cfg = get_net(i_encoder1, {"bottleneck":bottleneck, "code":code, "learning_rate":0.01, "nonlinearity":sigmoid })
+        dirname = "i_encoder_c%i_c%i_lr0.01" % (bottleneck, code)
+        train(net1_cfg,
+            data=prep_data(),
+            num_epochs=100,
+            batch_size=128,
+            shuffle=True,
+            mean_centering=True,
+            out_dir="output/%s" % dirname,
+            model_dir="/state/partition3/cbeckham/%s" % dirname,
+            schedule={50: 0.001},
+            resume="/usagers/cbeckham/github/log6308-project/output/i_encoder_c500_c500_lr0.01/10.model"
+        )
 
+    if "MASK200" in os.environ:
+        for bottleneck in [50, 100, 300, 400, 500]:
+            dirname = "i_simple_net_c%i_mask" % bottleneck
+            net1_cfg = get_net(i_simple_net, {"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "mask":True})
+            train(net1_cfg, data=prep_data(), num_epochs=10, batch_size=128, shuffle=True, mean_centering=True,
+                      model_dir="/state/partition3/cbeckham/%s" % dirname,
+                      out_dir="output/%s" % dirname)
+
+    if "SINGLE_LAYER_ADAM" in os.environ:
+        for bottleneck in [50, 100, 200, 300, 400, 500]:
+            dirname = "i_simple_net_c%i_adam" % bottleneck
+            net1_cfg = get_net(i_simple_net, {"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"adam"})
+            train(net1_cfg, data=prep_data(), num_epochs=10, batch_size=128, shuffle=True, mean_centering=True,
+                      model_dir="/state/partition3/cbeckham/%s" % dirname,
+                      out_dir="output/%s" % dirname)
+
+    #######################
+    # user-encoder models #
+    # #####################
+
+    if "U_SINGLE_LAYER" in os.environ:
+        for bottleneck in [50, 100, 200, 300, 400, 500]:
+            dirname = "u_simple_net_c%i" % bottleneck
+            net1_cfg = get_net(u_simple_net, {"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum"})
+            train(net1_cfg, data=prep_data(transpose=True), num_epochs=10, batch_size=128, shuffle=True, mean_centering=True,
+                      model_dir="/state/partition3/cbeckham/%s" % dirname,
+                      out_dir="output/%s" % dirname)
+
+
+    ############
+    # new data #
+    ############
+
+    if "U_NEW_SINGLE_LAYER" in os.environ:
+        for bottleneck in [50]:
+            dirname = "u_new_simple_net_c%i" % bottleneck
+            net1_cfg = get_net(u_simple_net, {"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum"})
+            train(net1_cfg, data=load_movielens10m_matrix_new(transpose=True), num_epochs=10, batch_size=128, shuffle=True, mean_centering=True,
+                      model_dir="/state/partition3/cbeckham/%s" % dirname,
+                      out_dir="output_new/%s" % dirname)
+
+    # testing hybrid model code
     
+    if "HYBRID_ITEM" in os.environ:
+        for bottleneck in [50]:
+            dirname = "hybrid_item_c%i" % bottleneck
+            net1_cfg = get_net(
+                (i_simple_net, u_simple_net),
+                {"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum", "mode":"item"}
+            )
+            train(
+                net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=30, batch_size=128, shuffle=True, mean_centering=True,
+                model_dir="/state/partition3/cbeckham/%s" % dirname,
+                out_dir="output_new/%s" % dirname
+            )
+
+    if "HYBRID_ITEM_DEEPER" in os.environ:
+        for bottleneck in [50]:
+            dirname = "hybrid_item_deeper_c%i" % bottleneck
+            net1_cfg = get_net(
+                (i_encoder1, u_encoder1),
+                {"bottleneck":bottleneck, "code":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum", "mode":"item"}
+            )
+            train(
+                net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=30, batch_size=128, shuffle=True, mean_centering=True,
+                model_dir="/state/partition3/cbeckham/%s" % dirname,
+                out_dir="output_new/%s" % dirname
+            )
+
+            
+    if "HYBRID_USER" in os.environ:
+        for bottleneck in [50]:
+            dirname = "hybrid_user_c%i" % bottleneck
+            net1_cfg = get_net(
+                (i_simple_net, u_simple_net),
+                {"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum", "mode":"user"}
+            )
+            train(
+                net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=30, batch_size=128, shuffle=True, mean_centering=True,
+                model_dir="/state/partition3/cbeckham/%s" % dirname,
+                out_dir="output_new/%s" % dirname
+            )
+
+    if "HYBRID_BOTH" in os.environ:
+        for bottleneck in [50]:
+            dirname = "hybrid_both_c%i" % bottleneck
+            net1_cfg = get_net(
+                (i_simple_net, u_simple_net),
+                {"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum", "mode":"both"}
+            )
+            train(
+                net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=30, batch_size=128, shuffle=True, mean_centering=True,
+                model_dir="/state/partition3/cbeckham/%s" % dirname,
+                out_dir="output_new/%s" % dirname
+            )
+
