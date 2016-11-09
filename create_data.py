@@ -127,6 +127,31 @@ def i_encoder1(args):
 def u_encoder1(args):
     return _encoder1(n_items=71567, args=args)
 
+def find_code_layer(l_out):
+    for layer in get_all_layers(l_out):
+        if layer.name == "code":
+            return layer
+    return None
+
+def ui_encoder(args):
+    n_users, n_items = 71567, 65133
+
+    l_i_in = InputLayer((None, n_items))
+    l_i_dense = DenseLayer(l_i_in, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"])
+    l_i_dense2 = DenseLayer(l_i_dense, num_units=args["code"], nonlinearity=args["nonlinearity"])
+    l_i_dense2.name = "code"
+    l_i_inv = DenseLayer(l_i_dense2, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"])
+    l_i_inv2 = DenseLayer(l_i_inv, num_units=n_items, nonlinearity=linear)
+
+    l_u_in = InputLayer((None, n_users))
+    l_u_dense = DenseLayer(l_u_in, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"])
+    l_u_dense2 = DenseLayer(l_u_dense, num_units=args["code"], nonlinearity=args["nonlinearity"], W=l_i_dense2.W, b=l_i_dense2.b)
+    l_u_dense2.name = "code"
+    l_u_inv = DenseLayer(l_u_dense2, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"])
+    l_u_inv2 = DenseLayer(l_u_inv, num_units=n_users, nonlinearity=linear)
+    
+    return l_i_inv2, l_u_inv2
+
 def i_simple_net(args):
     return _simple_net(n_items=65133, args=args)
 
@@ -150,6 +175,7 @@ def _encoder1(n_items, args):
     l_in = InputLayer((None, n_items))
     l_dense = DenseLayer(l_in, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"])
     l_dense2 = DenseLayer(l_dense, num_units=args["code"], nonlinearity=args["nonlinearity"])
+    l_dense2.name = "code"
     l_inv = DenseLayer(l_dense2, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"])
     l_inv2 = DenseLayer(l_inv, num_units=n_items, nonlinearity=linear)
     return l_inv2
@@ -158,6 +184,7 @@ def _encoder1(n_items, args):
 def _simple_net(n_items, args):
     l_in = InputLayer((None, n_items))
     l_dense = DenseLayer(l_in, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"])
+    l_dense.name = "code"
     l_inv = DenseLayer(l_dense, num_units=n_items, nonlinearity=linear)
     return l_inv
 
@@ -167,6 +194,7 @@ def simple_net_tieing(args):
     n_items = 65133
     l_in = InputLayer((None, n_items))
     l_dense = DenseLayer(l_in, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"])
+    l_dense.name = "code"
     l_inv = InverseLayer(l_dense, l_dense)
     return l_inv
 
@@ -182,7 +210,11 @@ def get_net(net_fns, args):
     M_I = T.fmatrix('M_I')
     M_U = T.fmatrix('M_U')
     # get the item encoder and the user encoder
-    l_out_i, l_out_u = net_fns[0](args), net_fns[1](args)
+    # if net_fns is a tuple
+    if type(net_fns) is tuple:
+        l_out_i, l_out_u = net_fns[0](args), net_fns[1](args)
+    else:
+        l_out_i, l_out_u = net_fns(args)
     print_network(l_out_i)
     print_network(l_out_u)
     net_out_i, net_out_u = get_output(l_out_i, X_I), get_output(l_out_u, X_U)
@@ -219,9 +251,14 @@ def get_net(net_fns, args):
     loss_fn = theano.function([X_I,M_I,X_U,M_U], [loss, loss_i, loss_u], on_unused_input='warn')
     out_fn_i = theano.function([X_I], net_out_i)
     out_fn_u = theano.function([X_U], net_out_u)
+    code_fn_i = theano.function([X_I], get_output( find_code_layer(l_out_i), X_I) )
+    code_fn_u = theano.function([X_U], get_output( find_code_layer(l_out_u), X_U) )
+    
     return {
         "train_fn": train_fn,
         "loss_fn": loss_fn,
+        "code_fn_i": code_fn_i,
+        "code_fn_u": code_fn_u,
         "lr": lr,
         "l_out_i": l_out_i,
         "l_out_u": l_out_u
@@ -232,26 +269,44 @@ def print_network(l_out):
         print layer, layer.output_shape
     print "number of params: %i" % count_params(layer)
 
+def mean_center(X_batch):
+    """
+    X_batch is modified in place
+    returns: row mean vector
+    """
+    row_means = []
+    for i in range(0, X_batch.shape[0]):
+        row = X_batch[i]
+        row_mean = np.sum(row) / ((row != 0).sum()+1)
+        row = row - row_mean
+        X_batch[i] = row
+        row_means.append([row_mean])
+    row_means = np.asarray(row_means, dtype="float32")
+    return row_means
+    
 def test(net_cfg, X_test, mean_centering=False):
     # mean center the test set
     row_means = []
     if mean_centering:
-        for i in range(0, X_test.shape[0]):
-            row = X_test[i]
-            #pdb.set_trace()
-            row_mean = np.sum(row) / ((row != 0).sum()+1)
-            row = row - row_mean
-            X_test[i] = row
-            row_means.append([row_mean])
-    # this is a column vector of means
-    row_means = np.asarray(row_means, dtype="float32")
+        mean_center(X_batch)
     # get the predictions
     out_fn = net_cfg["out_fn"]
     X_test_reconstruction = out_fn(X_test)
     # add the row means back in
 
     pass
-    
+
+def restore_model(net_cfg, model_file):
+    with open(model_file) as g:
+        dat = pickle.load(g)
+        set_all_param_values(net_cfg["l_out_i"], dat[0])
+        set_all_param_values(net_cfg["l_out_u"], dat[1])
+
+def dump_code_layer(net_cfg, model_file, X_batch):
+    print "restoring model..."
+    restore_model(net_cfg, model_file)
+
+
 def train(net_cfg, data, num_epochs, batch_size, out_dir, model_dir, schedule={}, resume=None, shuffle=False, mean_centering=False, quick_check=False, debug=False):
     print "training..."
     #pdb.set_trace()
@@ -264,8 +319,7 @@ def train(net_cfg, data, num_epochs, batch_size, out_dir, model_dir, schedule={}
     if resume != None:
         write_flag = "ab"
         print "resuming training..."
-        with open(resume) as g:
-            set_all_param_values(l_out, pickle.load(g))
+        restore_model(net_cfg, resume)
     else:
         write_flag = "wb"
     f_clean = open("%s/results.txt" % out_dir, write_flag)
@@ -286,6 +340,7 @@ def train(net_cfg, data, num_epochs, batch_size, out_dir, model_dir, schedule={}
         for I_tp, U_tp in itertools.izip(i_iterator, u_iterator):
             X_batch_I, X_mask_I = I_tp
             X_batch_U, X_mask_U = U_tp
+            #pdb.set_trace()
             if debug:
                 pdb.set_trace()
             this_loss, this_loss_i, this_loss_u = train_fn(X_batch_I, X_mask_I, X_batch_U, X_mask_U)
@@ -416,7 +471,7 @@ if __name__ == '__main__':
             )
 
     if "HYBRID_ITEM_DEEPER" in os.environ:
-        for bottleneck in [50]:
+        for bottleneck in [100, 200, 300]:
             dirname = "hybrid_item_deeper_c%i" % bottleneck
             net1_cfg = get_net(
                 (i_encoder1, u_encoder1),
@@ -428,6 +483,31 @@ if __name__ == '__main__':
                 out_dir="output_new/%s" % dirname
             )
 
+    if "HYBRID_USER_DEEPER" in os.environ:
+        for bottleneck in [100, 200, 300]:
+            dirname = "hybrid_user_deeper_c%i" % bottleneck
+            net1_cfg = get_net(
+                (i_encoder1, u_encoder1),
+                {"bottleneck":bottleneck, "code":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum", "mode":"user"}
+            )
+            train(
+                net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=30, batch_size=128, shuffle=True, mean_centering=True,
+                model_dir="/state/partition3/cbeckham/%s" % dirname,
+                out_dir="output_new/%s" % dirname
+            )
+            
+    if "HYBRID_BOTH_DEEPER_TIED" in os.environ:
+        for bottleneck in [100, 200, 300]:
+            dirname = "hybrid_both_deeper_tied_c%i" % bottleneck
+            net1_cfg = get_net(
+                ui_encoder,
+                {"bottleneck":bottleneck, "code":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum", "mode":"both"}
+            )
+            train(
+                net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=30, batch_size=128, shuffle=True, mean_centering=True,
+                model_dir="/state/partition3/cbeckham/%s" % dirname,
+                out_dir="output_new/%s" % dirname
+            )
             
     if "HYBRID_USER" in os.environ:
         for bottleneck in [50]:
