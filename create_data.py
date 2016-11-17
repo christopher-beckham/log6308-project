@@ -17,6 +17,67 @@ from lasagne.regularization import *
 
 import itertools
 
+from lasagne import init
+from lasagne import nonlinearities
+
+class DenseLowRankLayer(Layer):
+    def __init__(self, incoming, num_units, W1=init.GlorotUniform(), W2=init.GlorotUniform(), k=1,
+                 b=init.Constant(0.), nonlinearity=nonlinearities.rectify,
+                 num_leading_axes=1, **kwargs):
+        super(DenseLowRankLayer, self).__init__(incoming, **kwargs)
+        self.nonlinearity = (nonlinearities.identity if nonlinearity is None
+                             else nonlinearity)
+
+        self.num_units = num_units
+        self.k = k
+        
+        if num_leading_axes >= len(self.input_shape):
+            raise ValueError(
+                    "Got num_leading_axes=%d for a %d-dimensional input, "
+                    "leaving no trailing axes for the dot product." %
+                    (num_leading_axes, len(self.input_shape)))
+        elif num_leading_axes < -len(self.input_shape):
+            raise ValueError(
+                    "Got num_leading_axes=%d for a %d-dimensional input, "
+                    "requesting more trailing axes than there are input "
+                    "dimensions." % (num_leading_axes, len(self.input_shape)))
+        self.num_leading_axes = num_leading_axes
+
+        if any(s is None for s in self.input_shape[num_leading_axes:]):
+            raise ValueError(
+                    "A DenseLayer requires a fixed input shape (except for "
+                    "the leading axes). Got %r for num_leading_axes=%d." %
+                    (self.input_shape, self.num_leading_axes))
+        num_inputs = int(np.prod(self.input_shape[num_leading_axes:]))
+        
+        # W_(num inputs x num_units) = W1_(num_inputs x m) * W2_(m x num_units)
+
+        self.W1 = self.add_param(W1, (num_inputs, k), name="W1")
+        self.W2 = self.add_param(W2, (k, num_units), name="W2")
+        
+        if b is None:
+            self.b = None
+        else:
+            self.b = self.add_param(b, (num_units,), name="b",
+                                    regularizable=False)
+
+    def get_output_shape_for(self, input_shape):
+        return input_shape[:self.num_leading_axes] + (self.num_units,)
+
+    def get_output_for(self, input, **kwargs):
+        num_leading_axes = self.num_leading_axes
+        if num_leading_axes < 0:
+            num_leading_axes += input.ndim
+        if input.ndim > num_leading_axes + 1:
+            # flatten trailing axes (into (n+1)-tensor for num_leading_axes=n)
+            input = input.flatten(num_leading_axes + 1)
+
+        activation = T.dot(input, T.dot(self.W1, self.W2))
+        if self.b is not None:
+            activation = activation + self.b
+        return self.nonlinearity(activation)
+
+
 ################
 # data loading #
 ################
@@ -152,6 +213,23 @@ def ui_encoder(args):
     l_u_inv2 = DenseLayer(l_u_inv, num_units=n_users, nonlinearity=linear)
     
     return l_i_inv2, l_u_inv2
+
+def ui_encoder_lowrank1(args):
+    n_users, n_items = 71567, 65133
+
+    l_i_in = InputLayer((None, n_items))
+    l_i_dense = DenseLowRankLayer(l_i_in, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"], k=args["k"])
+    l_i_dense.name = "code"
+    l_i_inv = DenseLayer(l_i_dense, num_units=n_items, nonlinearity=linear)
+
+    l_u_in = InputLayer((None, n_users))
+    l_u_dense = DenseLowRankLayer(l_u_in, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"], k=args["k"], W2=l_i_dense.W2)
+    l_u_dense.name = "code"
+    l_u_inv = DenseLayer(l_u_dense, num_units=n_users, nonlinearity=linear)
+    
+    return l_i_inv, l_u_inv
+
+
 
 def ui_encoder_double(args):
     n_users, n_items = 71567, 65133
@@ -575,8 +653,7 @@ if __name__ == '__main__':
             for bottleneck in [25]:
                 dirname = "hybrid_item_l2-%f_c%i" % (l2_coef, bottleneck)
                 net1_cfg = get_net((i_simple_net, u_simple_net), {"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum", "mode":"item", "l2":l2_coef})
-                train(net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=40, batch_size=128, shuffle=True, mean_centering=True,model_dir="/state/partition4/cbeckham/%s" % dirname,out_dir="output_new/%s" % dirname, resume="/state/partition4/cbeckham/hybrid_item_l2-0.000100_c25/40.model.bak")
-
+                train(net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=100, batch_size=1024, shuffle=True, mean_centering=True,model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,out_dir="output_new/%s" % dirname, resume="/storeSSD/cbeckham/log6308_models/hybrid_item_l2-0.000100_c25/40.model.bak")
 
                 
     if "HYBRID_ITEM_MASK" in os.environ:
@@ -644,6 +721,15 @@ if __name__ == '__main__':
             net1_cfg = get_net(ui_encoder_double, {"bottleneck":bottleneck, "code":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum", "mode":"both"})
             train(net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=30, batch_size=128, shuffle=True, mean_centering=True, model_dir="/state/partition4/cbeckham/%s" % dirname, out_dir="output_new/%s" % dirname)
 
+    if "HYBRID_BOTH_LOW_RANK_TIED" in os.environ:
+        for bottleneck in [25]:
+            for k in [5, 10, 20]:
+                dirname = "hybrid_both_lowrank_tied_fixed_k%i_c%i" % (k, bottleneck)
+                net1_cfg = get_net(ui_encoder_lowrank1, {"bottleneck":bottleneck, "k":k, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum", "mode":"both"})
+                train(net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=30, batch_size=128, shuffle=True, mean_centering=True, model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname, out_dir="output_new/%s" % dirname)
+        
+
+        ui_encoder_lowrank1
             
 
     if "DEBUG" in os.environ:
