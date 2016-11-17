@@ -1,19 +1,19 @@
 
-tmp = read.csv("../output_new/hybrid_item_l2-0.000001_c25/results.txt")
-tmp2 = read.csv("../output_new/hybrid_item_l2-0.000000_c25/results.txt")
-tmp3 = read.csv("../output_new/hybrid_item_l2-0.000010_c25/results.txt")
-plot(dfi25$valid_i_loss,type="l", ylim=c(0,1))
+tmp = read.csv("/Users/cjb60/Desktop/cuda4_4/github/log6308-project/output_new/hybrid_item_lowrank2_m1-5_c50/results.txt")
+tmp2 = read.csv("/Users/cjb60/Desktop/cuda4_4/github/log6308-project/output_new/hybrid_item_lowrank2_m1-10_c50/results.txt")
+tmp3 = read.csv("/Users/cjb60/Desktop/cuda4_4/github/log6308-project/output_new/hybrid_item_lowrank2_m1-20_c50/results.txt")
+
+plot(dfi25$train_i_loss,type="l")
+lines(tmp$train_i_loss,type="l",col="red")
+
+plot(dfi50$valid_i_loss,type="l")
 lines(tmp$valid_i_loss,type="l",col="red")
 lines(tmp2$valid_i_loss,type="l",col="blue")
-lines(tmp3$valid_i_loss,col="purple")
+lines(tmp3$valid_i_loss,type="l",col="purple")
 
-tmp4 = read.csv("../output_new/hybrid_item_s-0.010000_c25//results.txt")
-tmp5 = read.csv("../output_new/hybrid_item_s-0.050000_c25//results.txt")
-tmp6 = read.csv("../output_new/hybrid_item_s-0.100000_c25/results.txt")
-plot(dfi25$valid_i_loss,type="l", ylim=c(0,1))
-lines(tmp4$valid_i_loss,col="red")
-lines(tmp5$valid_i_loss,col="blue")
-lines(tmp6$valid_i_loss,col="purple")
+plot(dfu25$valid_u_loss,type="l",xlim=c(0,25))
+lines(tmp$valid_u_loss,type="l",col="red")
+
 
 ####################
 # ITEM AUTOENCODER #
@@ -81,11 +81,6 @@ dev.off()
 
 ###
 
-dftd25 = read.csv("../output_new/hybrid_both_deeper_tied_fixed_c25/results.txt")
-dftd50 = read.csv("../output_new/hybrid_both_deeper_tied_c50/results.txt")
-dftd100 = read.csv("../output_new/hybrid_both_deeper_tied_c100/results.txt")
-dftd200 = read.csv("../output_new/hybrid_both_deeper_tied_c200/results.txt")
-
 ###
 
 ###########################
@@ -127,22 +122,64 @@ lines(dfud50$valid_u_loss,type="l",lwd=2,col="red")
 lines(dfud100$valid_u_loss,type="l",lwd=2,col="green")
 lines(dfud200$valid_u_loss,type="l",lwd=2,col="purple")
 
+###########################
+# COMPARE SHALLOW/DEEP    #
+###########################
+
+pdf("test.pdf", height=5)
+
+par(mfrow=c(2,4))
+
+plot(sqrt(dfi25$valid_i_loss),type="l", xlab="epoch", ylab="RMSE")
+lines(sqrt(dfid25$valid_i_loss), col="red")
+legend("topright", legend=c("item-25","item-25-25"), col=c("black", "red"), lty=c("solid", "solid"),cex=0.5)
+plot(sqrt(dfu25$valid_u_loss),type="l", xlab="epoch", ylab="RMSE")
+lines(sqrt(dfud25$valid_u_loss), col="red")
+legend("topright", legend=c("user-25","user-25-25"), col=c("black", "red"), lty=c("solid", "solid"),cex=0.5)
+
+plot(sqrt(dfi50$valid_i_loss),type="l", xlab="epoch", ylab="RMSE")
+lines(sqrt(dfid50$valid_i_loss), col="red")
+legend("topright", legend=c("item-50","item-50-50"), col=c("black", "red"), lty=c("solid", "solid"),cex=0.5)
+plot(sqrt(dfu50$valid_u_loss),type="l", xlab="epoch", ylab="RMSE")
+lines(sqrt(dfud50$valid_u_loss), col="red")
+legend("topright", legend=c("user-50","user-50-50"), col=c("black", "red"), lty=c("solid", "solid"),cex=0.5)
+
+plot(sqrt(dfi100$valid_i_loss),type="l", xlab="epoch", ylab="RMSE")
+lines(sqrt(dfid100$valid_i_loss), col="red")
+legend("topright", legend=c("item-100","item-100-100"), col=c("black", "red"), lty=c("solid", "solid"), cex=0.5)
+plot(sqrt(dfu100$valid_u_loss),type="l", xlab="epoch", ylab="RMSE")
+lines(sqrt(dfud100$valid_u_loss), col="red")
+legend("topright", legend=c("user-100","user-100-100"), col=c("black", "red"), lty=c("solid", "solid"), cex=0.5)
+
+plot(sqrt(dfi200$valid_i_loss),type="l", xlab="epoch", ylab="RMSE")
+lines(sqrt(dfid200$valid_i_loss), col="red")
+legend("topright", legend=c("item-200","item-200-200"), col=c("black", "red"), lty=c("solid", "solid"), cex=0.5)
+plot(sqrt(dfu200$valid_u_loss),type="l", xlab="epoch", ylab="RMSE")
+lines(sqrt(dfud200$valid_u_loss), col="red")
+legend("topright", legend=c("user-200","user-200-200"), col=c("black", "red"), lty=c("solid", "solid"), cex=0.5)
+
+dev.off()
 
 ###########################
 # DEEPER TIED AUTOENCODER #
 ###########################
 
+dftd25 = read.csv("../output_new/hybrid_both_deeper_tied_doubly_fixed_c25/results.txt")
+dftd50 = read.csv("../output_new/hybrid_both_deeper_tied_c50/results.txt")
+dftd100 = read.csv("../output_new/hybrid_both_deeper_tied_c100/results.txt")
+dftd200 = read.csv("../output_new/hybrid_both_deeper_tied_c200/results.txt")
+
 # train loss for user25
 plot(sqrt(dftd25$train_u_loss),type="l",lwd=2, ylim=c(0,1))
 lines(sqrt(dfud25$train_u_loss),col="red",lwd=2)
 # valid loss for user25
-plot(sqrt(dftd25$valid_u_loss),type="l",lwd=2, ylim=c(0,1))
+plot(sqrt(dftd25$valid_u_loss),type="l",lwd=2)
 lines(sqrt(dfud25$valid_u_loss),col="red",lwd=2)
 # train loss for item25
 plot(sqrt(dftd25$train_i_loss),type="l",lwd=2, ylim=c(0,1))
 lines(sqrt(dfid25$train_i_loss),col="red",lwd=2)
 # valid loss for item25
-plot(sqrt(dftd25$valid_i_loss),type="l",lwd=2, ylim=c(0,1))
+plot(sqrt(dftd25$valid_i_loss),type="l",lwd=2)
 lines(sqrt(dfid25$valid_i_loss),col="red",lwd=2)
 
 
