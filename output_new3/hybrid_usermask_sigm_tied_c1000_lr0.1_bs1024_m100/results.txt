@@ -1,0 +1,2 @@
+epoch,train_loss,train_i_loss,train_u_loss,valid_loss,valid_i_loss,valid_u_loss,valid_i_rmse,valid_u_rmse,learning_rate,time
+1,0.004078,0.000000,0.004078,0.000551,0.000000,0.000551,0.993876,0.924495,0.100000,221.311663

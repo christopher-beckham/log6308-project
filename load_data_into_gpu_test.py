@@ -13,8 +13,13 @@ from lasagne.utils import floatX
 
 from time import time
 
-X_train, X_valid, X_test = create_data.load_movielens10m_matrix_new()
-X_train = X_train[0:1000,].todense()
+X_train, X_valid, X_test = create_data.load_movielens100k_matrix_new()
+
+X_train = X_train.todense()
+
+#pdb.set_trace()
+
+#X_train = X_train[0:1000,].todense()
 X_train_rowsum = np.sum(X_train, axis=1)
 X_train = X_train - X_train_rowsum
 

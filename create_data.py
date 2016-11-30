@@ -125,11 +125,7 @@ class DenseLowRankLayer(Layer):
 # data loading #
 ################
 
-def load_movielens10m_matrix_new():
-    data_dir = "data/movielens10m"
-    ratings = np.load("%s/movielens10m.pkl_01.npy" % data_dir)
-    movies = np.load("%s/movielens10m.pkl_02.npy" % data_dir)
-    users = np.load("%s/movielens10m.pkl_03.npy" % data_dir)
+def split_matrix_into_two(ratings, movies, users):
     # randomly shuffle
     np.random.seed(0)
     idxs = [x for x in range(0, len(ratings))]
@@ -140,21 +136,88 @@ def load_movielens10m_matrix_new():
     n_users, n_items = tmp.shape
     # split into X_train, X_valid, X_test
     X_train = csr_matrix(
-        (ratings[0:int(0.8*len(ratings))], (users[0:int(0.8*len(users))], movies[0:int(0.8*len(movies))])), 
+        (ratings[0:int(0.9*len(ratings))], (users[0:int(0.9*len(users))], movies[0:int(0.9*len(movies))])), 
         shape=(n_users, n_items)
     )
     print "X_train = ", X_train.shape
-    X_valid = csr_matrix(
-        (ratings[int(0.8*len(ratings)):int(0.9*len(ratings))], (users[int(0.8*len(users)):int(0.9*len(users))], movies[int(0.8*len(movies)):int(0.9*len(movies))])), 
-        shape=(n_users, n_items)
-    )
-    print "X_valid = ", X_valid.shape
     X_test = csr_matrix(
         (ratings[int(0.9*len(ratings))::], (users[int(0.9*len(users))::], movies[int(0.9*len(movies))::])), 
         shape=(n_users, n_items)
     )
     print "X_test = ", X_test.shape
+    return X_train, X_test
+    
+
+def split_matrix(ratings, movies, users, seed=0):
+    # randomly shuffle
+    np.random.seed(seed)
+    idxs = [x for x in range(0, len(ratings))]
+    np.random.shuffle(idxs)
+    ratings, movies, users = ratings[idxs], movies[idxs], users[idxs]
+    # determine the size of the matrix
+    tmp = csr_matrix((ratings, (users, movies)))
+    n_users, n_items = tmp.shape
+    # split into X_train, X_valid, X_test
+
+    train_ratings, train_users, train_movies = ratings[0:int(0.8*len(ratings))], users[0:int(0.8*len(users))], movies[0:int(0.8*len(movies))]
+    valid_ratings, valid_users, valid_movies = \
+      ratings[int(0.8*len(ratings)):int(0.9*len(ratings))], users[int(0.8*len(users)):int(0.9*len(users))], movies[int(0.8*len(movies)):int(0.9*len(movies))]
+    test_ratings, test_users, test_movies = ratings[int(0.9*len(ratings))::], users[int(0.9*len(users))::], movies[int(0.9*len(movies))::]
+      
+    X_train = csr_matrix(
+        (train_ratings, (train_users, train_movies)), 
+        shape=(n_users, n_items)
+    )
+    print "X_train = ", X_train.shape
+    X_valid = csr_matrix(
+        (valid_ratings, (valid_users, valid_movies)),
+        shape=(n_users, n_items)
+    )
+    print "X_valid = ", X_valid.shape
+    X_test = csr_matrix(
+        (test_ratings, (test_users, test_movies)), 
+        shape=(n_users, n_items)
+    )
+    print "X_test = ", X_test.shape
+    
     return X_train, X_valid, X_test
+
+    
+def load_movielens100k_matrix_new(split=True, seed=0):
+    data_dir = "data/movielens100k"
+    ratings = np.load("%s/movielens100k.pkl_01.npy" % data_dir)
+    movies = np.load("%s/movielens100k.pkl_02.npy" % data_dir)
+    users = np.load("%s/movielens100k.pkl_03.npy" % data_dir)
+    if not split:
+        return csr_matrix((ratings, (users,movies)))
+    return split_matrix(ratings, movies, users, seed)
+
+def load_movielens100k_matrix_new_two(split=True, seed=0):
+    data_dir = "data/movielens100k"
+    ratings = np.load("%s/movielens100k.pkl_01.npy" % data_dir)
+    movies = np.load("%s/movielens100k.pkl_02.npy" % data_dir)
+    users = np.load("%s/movielens100k.pkl_03.npy" % data_dir)
+    if not split:
+        return csr_matrix((ratings, (users,movies)))
+    return split_matrix_into_two(ratings, movies, users, seed)
+
+def load_movielens1m_matrix_new(split=True, seed=0):
+    data_dir = "data/movielens1m"
+    ratings = np.load("%s/movielens1m.pkl_01.npy" % data_dir)
+    movies = np.load("%s/movielens1m.pkl_02.npy" % data_dir)
+    users = np.load("%s/movielens1m.pkl_03.npy" % data_dir)
+    if not split:
+        return csr_matrix((ratings, (users,movies)))
+    return split_matrix(ratings, movies, users, seed)
+    
+def load_movielens10m_matrix_new(split=True, seed=0):
+    data_dir = "data/movielens10m"
+    ratings = np.load("%s/movielens10m.pkl_01.npy" % data_dir)
+    movies = np.load("%s/movielens10m.pkl_02.npy" % data_dir)
+    users = np.load("%s/movielens10m.pkl_03.npy" % data_dir)
+    if not split:
+        return csr_matrix((ratings, (users,movies)))
+    return split_matrix(ratings, movies, users, seed)
 
 # -----------
 
@@ -205,10 +268,10 @@ def iterator(matr, bs=32, mean_centering=False, shuffle=False):
 
 
 def i_encoder1(args):
-    return _encoder1(n_items=65133, args=args)
+    return _encoder1(n_items=args["n_items"], args=args)
 
 def u_encoder1(args):
-    return _encoder1(n_items=71567, args=args)
+    return _encoder1(n_items=args["n_users"], args=args)
 
 def find_code_layer(l_out):
     for layer in get_all_layers(l_out):
@@ -217,7 +280,7 @@ def find_code_layer(l_out):
     return None
 
 def ui_encoder(args):
-    n_users, n_items = 71567, 65133
+    n_users, n_items = args["n_users"], args["n_items"]
 
     l_i_in = InputLayer((None, n_items))
     l_i_dense = DenseLayer(l_i_in, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"])
@@ -236,7 +299,7 @@ def ui_encoder(args):
     return l_i_inv2, l_u_inv2
 
 def ui_encoder_lowrank(args):
-    n_users, n_items = 71567, 65133
+    n_users, n_items = args["n_users"], args["n_items"]
 
     l_i_in = InputLayer((None, n_items))
     l_i_dense = DenseLowRankLayer(l_i_in, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"], k=args["m1"])
@@ -250,48 +313,9 @@ def ui_encoder_lowrank(args):
     
     return l_i_inv, l_u_inv
 
-"""
-def ui_encoder_lowrank2(args):
-    n_users, n_items = 71567, 65133
-
-    l_i_in = InputLayer((None, n_items))
-    l_i_dense = DenseLowRankLayer(l_i_in, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"], k=args["m1"])
-    l_i_dense.name = "code"
-    l_i_inv = DenseLowRankLayer(l_i_dense, num_units=n_items, nonlinearity=linear, k=args["k"])
-
-    l_u_in = InputLayer((None, n_users))
-    l_u_dense = DenseLowRankLayer(l_u_in, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"], k=args["m2"], W2=l_i_dense.W2)
-    l_u_dense.name = "code"
-    l_u_inv = DenseLowRankLayer(l_u_dense, num_units=n_users, nonlinearity=linear, k=args["k"], W1=l_i_inv.W1)
-    
-    return l_i_inv, l_u_inv
-"""
-
-
-"""
-def ui_encoder_lowrank2_manual(args):
-    n_users, n_items = 71567, 65133
-
-    l_i_in = InputLayer((None, n_items))
-    l_i_dense = DenseLayer(l_i_in, num_units=args["k"], nonlinearity=linear) # bottleneck to m
-    l_i_dense2 = DenseLayer(l_i_dense, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"]) # bottleneck to k
-    l_i_inv = DenseLayer(l_i_dense2, num_units=args["k"], nonlinearity=linear, k=args["k"]) # bottleneck to m
-    l_i_inv2 = DenseLayer(l_i_inv, num_units=n_items, nonlinearity=linear) # back to the input dimension
-
-    
-
-    l_u_in = InputLayer((None, n_users))
-    l_u_dense = DenseLowRankLayer(l_u_in, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"], k=args["k"], W2=l_i_dense.W2)
-    l_u_dense.name = "code"
-    l_u_inv = DenseLowRankLayer(l_u_dense, num_units=n_users, nonlinearity=linear, k=args["k"], W1=l_i_inv.W1)
-    
-    return l_i_inv, l_u_inv
-"""
-
-
 
 def ui_encoder_double(args):
-    n_users, n_items = 71567, 65133
+    n_users, n_items = args["n_users"], args["n_items"]
 
     l_i_in = InputLayer((None, n_items))
     l_i_dense = DenseLayer(l_i_in, num_units=args["bottleneck"], nonlinearity=args["nonlinearity"])
@@ -312,10 +336,10 @@ def ui_encoder_double(args):
 
 
 def i_simple_net_lowrank2(args):
-    return _simple_net_lowrank2(n_items=65133, args=args)
+    return _simple_net_lowrank2(n_items=args["n_items"], args=args)
 
 def u_simple_net_lowrank2(args):
-    return _simple_net_lowrank2(n_items=71567, args=args)
+    return _simple_net_lowrank2(n_items=args["n_users"], args=args)
 
 def _simple_net_lowrank2(n_items, args):
     l_in = InputLayer((None, n_items))
@@ -329,10 +353,10 @@ def _simple_net_lowrank2(n_items, args):
 
 
 def i_simple_net_lowrank(args):
-    return _simple_net_lowrank(n_items=65133, args=args)
+    return _simple_net_lowrank(n_items=args["n_items"], args=args)
 
 def u_simple_net_lowrank(args):
-    return _simple_net_lowrank(n_items=71567, args=args)
+    return _simple_net_lowrank(n_items=args["n_users"], args=args)
 
 def _simple_net_lowrank(n_items, args):
     l_in = InputLayer((None, n_items))
@@ -347,10 +371,10 @@ def _simple_net_lowrank(n_items, args):
 
 
 def i_simple_net_lowrank_tied(args):
-    return _simple_net_lowrank_tied(n_items=65133, args=args)
+    return _simple_net_lowrank_tied(n_items=args["n_items"], args=args)
 
 def u_simple_net_lowrank_tied(args):
-    return _simple_net_lowrank_tied(n_items=71567, args=args)
+    return _simple_net_lowrank_tied(n_items=args["n_users"], args=args)
 
 def _simple_net_lowrank_tied(n_items, args):
     l_in = InputLayer((None, n_items))
@@ -364,25 +388,28 @@ def _simple_net_lowrank_tied(n_items, args):
 
 
 def i_simple_net(args):
-    return _simple_net(n_items=65133, args=args)
+    return _simple_net(n_items=args["n_items"], args=args)
 
 def u_simple_net(args):
-    return _simple_net(n_items=71567, args=args)
+    return _simple_net(n_items=args["n_users"], args=args)
 
 # u/i agnostic implementations
 
 
 def i_encoder1_tieing(args):
-    return _encoder1_tieing(n_items=65133, args=args)
+    return _encoder1_tieing(n_items=args["n_items"], args=args)
 
 def u_encoder1_tieing(args):
-    return _encoder1_tieing(n_items=71567, args=args)
+    return _encoder1_tieing(n_items=args["n_users"], args=args)
 
 def _encoder1_tieing(n_items, args):
     l_in = InputLayer((None, n_items))
+    if "sigma" in args:
+        print "adding gauss noise: %f" % args["sigma"]
+        l_in = GaussianNoiseLayer(l_in, args["sigma"])
     l_dense = l_in
     for b in args["bottleneck"]:
-        l_dense = DenseLayer(l_dense, num_units=b)
+        l_dense = DenseLayer(l_dense, num_units=b, nonlinearity=args["nonlinearity"])
     l_dense.name = "code"
     l_inv = l_dense
     for layer in get_all_layers(l_inv)[::-1]:
@@ -612,7 +639,7 @@ def dump_users_to_disk(out_file, X_full, mean_centering):
         break
     np.save(out_file, X_batch)
 
-def train(net_cfg, data, num_epochs, batch_size, out_dir, model_dir, schedule={}, resume=None, shuffle=False, mean_centering=False, quick_check=False, debug=False):
+def train(net_cfg, data, num_epochs, batch_size, out_dir, model_dir, schedule={}, resume=None, shuffle=False, mean_centering=False, quick_check=False, debug=False, save_model=True):
     print "training..."
     #pdb.set_trace()
     if not os.path.exists(out_dir):
@@ -689,32 +716,13 @@ def train(net_cfg, data, num_epochs, batch_size, out_dir, model_dir, schedule={}
         f_clean.write("%s\n" % out_str)
         f_clean.flush()
         print out_str
-        with open("%s/%i.model" % (model_dir, epoch+1), "wb") as g:
-            pickle.dump( [ get_all_param_values(l_out_i), get_all_param_values(l_out_u) ], g, pickle.HIGHEST_PROTOCOL)
-            #np.savez(g, get_all_param_values(l_out_i), get_all_param_values(l_out_u) )
+        if save_model:
+            with open("%s/%i.model" % (model_dir, epoch+1), "wb") as g:
+                pickle.dump( [ get_all_param_values(l_out_i), get_all_param_values(l_out_u) ], g, pickle.HIGHEST_PROTOCOL)
+                #np.savez(g, get_all_param_values(l_out_i), get_all_param_values(l_out_u) )
 
 if __name__ == '__main__':
             
-
-    ############
-    # new data #
-    ############
-
-    if "U_NEW_SINGLE_LAYER" in os.environ:
-        for bottleneck in [50]:
-            dirname = "u_new_simple_net_c%i" % bottleneck
-            net1_cfg = get_net(u_simple_net, {"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum"})
-            train(net1_cfg, data=load_movielens10m_matrix_new(transpose=True), num_epochs=10, batch_size=128, shuffle=True, mean_centering=True,
-                      model_dir="/state/partition3/cbeckham/%s" % dirname,
-                      out_dir="output_new/%s" % dirname)
-    
-
-
-    if "HYBRID_ITEM_RELU" in os.environ:
-        for bottleneck in [5000]:
-            dirname = "hybrid_item_relu_c%i" % bottleneck
-            net1_cfg = get_net((i_simple_net, u_simple_net),{"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":rectify, "optimiser":"nesterov_momentum", "mode":"item"})
-            train(net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=15, batch_size=128, shuffle=True, mean_centering=True,model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,out_dir="output_new2/%s" % dirname)            
 
 
     # output_new3
@@ -757,14 +765,6 @@ if __name__ == '__main__':
             net1_cfg = get_net((i_encoder1_tieing, u_encoder1_tieing),{"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum", "mode":"item_mask"})
             train(net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=30, batch_size=1024, shuffle=True, mean_centering=True,model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,out_dir="output_new3/%s" % dirname)
 
-            
-    if "HYBRID_ITEMMASK_SIGM_TIED_BS2048" in os.environ:
-        seed = 0
-        lasagne.random.set_rng( np.random.RandomState(seed) )
-        for bottleneck in [1000]:
-            dirname = "hybrid_itemmask_sigm_rp_tied_c%i_lr0.1_bs2048" % bottleneck
-            net1_cfg = get_net((i_encoder1_tieing, u_encoder1_tieing),{"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum", "mode":"item_mask"})
-            train(net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=50, batch_size=2048, shuffle=True, mean_centering=True,model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,out_dir="output_new3/%s" % dirname)
 
 
 
@@ -780,17 +780,19 @@ if __name__ == '__main__':
     if "HYBRID_USERMASK_SIGM_TIED" in os.environ:
         seed = 0
         lasagne.random.set_rng( np.random.RandomState(seed) )
+        data = load_movielens10m_matrix_new()
         for bottleneck in [1000]:
             dirname = "hybrid_usermask_sigm_tied_c%i_lr0.1" % bottleneck
-            net1_cfg = get_net((i_encoder1_tieing, u_encoder1_tieing),{"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum", "mode":"user_mask"})
-            train(net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=30, batch_size=128, shuffle=True, mean_centering=True, model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,out_dir="output_new3/%s" % dirname)
+            net1_cfg = get_net((i_encoder1_tieing, u_encoder1_tieing),{"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum", "mode":"user_mask", "n_users":data[0].shape[0], "n_items":data[0].shape[1]})
+            train(net1_cfg, data=data, num_epochs=30, batch_size=128, shuffle=True, mean_centering=True, model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,out_dir="output_new3/%s" % dirname)
 
     if "HYBRID_USERMASK_SIGM_TIED_BS1024" in os.environ:
         seed = 0
         lasagne.random.set_rng( np.random.RandomState(seed) )
-        for bottleneck in [1000]:
+        data = load_movielens10m_matrix_new()
+        for bottleneck in [2000]:
             dirname = "hybrid_usermask_sigm_tied_c%i_lr0.1_bs1024" % bottleneck
-            net1_cfg = get_net((i_encoder1_tieing, u_encoder1_tieing),{"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum", "mode":"user_mask"})
+            net1_cfg = get_net((i_encoder1_tieing, u_encoder1_tieing),{"bottleneck":[bottleneck], "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum", "mode":"user_mask","n_users":data[0].shape[0],"n_items":data[0].shape[1]})
             train(net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=30, batch_size=1024, shuffle=True, mean_centering=True, model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,out_dir="output_new3/%s" % dirname)
 
     if "HYBRID_USERMASK_SIGM_TIED_BS1024_DEEPER" in os.environ:
@@ -800,30 +802,143 @@ if __name__ == '__main__':
             code_conf = ",".join([str(elem) for elem in bottleneck])
             dirname = "hybrid_usermask_sigm_tied_c%s_lr0.1_bs1024" % code_conf
             net1_cfg = get_net((i_encoder1_tieing, u_encoder1_tieing),{"bottleneck":bottleneck, "learning_rate":0.1, "optimiser":"nesterov_momentum", "mode":"user_mask"})
-            train(net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=30, batch_size=1024, shuffle=True, mean_centering=True, model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,out_dir="output_new3/%s" % dirname)
+            train(net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=50, batch_size=1024, shuffle=True, mean_centering=True, model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,out_dir="output_new3/%s" % dirname)
 
+
+    # u_simple_net
             
-    if "HYBRID_USERMASK_SIGM_TIED_BS1024_M" in os.environ:
+    if "HYBRID_USERMASK_SIGM_TIED_BS1024_ML100K" in os.environ:
+        data=load_movielens100k_matrix_new()
         seed = 0
         lasagne.random.set_rng( np.random.RandomState(seed) )
-        for m in [800]:
-            for bottleneck in [1000]:
-                dirname = "hybrid_usermask_sigm_tied_c%i_lr0.1_bs1024_m%i" % (bottleneck, m)
-                net1_cfg = get_net((i_simple_net_lowrank_tied, u_simple_net_lowrank_tied), {"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum", "mode":"user_mask", "m":m})
-                train(net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=30, batch_size=1024, shuffle=True, mean_centering=True, model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,out_dir="output_new3/%s" % dirname)
+        for bottleneck in [ [5000] ]:
+            code_conf = ",".join([str(elem) for elem in bottleneck])
+            dirname = "hybrid_usermask_sigm_tied_c%s_lr0.1_bs1024" % code_conf
+            net1_cfg = get_net((i_encoder1_tieing, u_encoder1_tieing),
+                                   {"bottleneck":bottleneck, "learning_rate":0.1, "optimiser":"nesterov_momentum", "mode":"user_mask", "nonlinearity":rectify, "n_users":data[0].shape[0], "n_items":data[0].shape[1] })
+            #train(net1_cfg, data=data, num_epochs=50, batch_size=1024, shuffle=True, mean_centering=True, model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,
+            #          out_dir="output_100k/%s" % dirname)
+            dump_code_layer("codes/hybrid_usermask_sigm_tied_c%s_lr0.1_bs1024.train.npy" % code_conf, net1_cfg, "user", "/storeSSD/cbeckham/log6308_models/hybrid_usermask_sigm_tied_c%s_lr0.1_bs1024/50.model" % code_conf, data[0].T, True)
 
 
-            
-            
-
-    if "HYBRID_USERMASK_SIGM_TIED_L2" in os.environ:
+    if "HYBRID_USERMASK_TANH_TIED_BS1024_ML100K" in os.environ:
+        data=load_movielens100k_matrix_new()
         seed = 0
         lasagne.random.set_rng( np.random.RandomState(seed) )
-        for l2_coef in [1e-6, 1e-5, 1e-4]:
-            for bottleneck in [600]:
-                dirname = "hybrid_usermask_sigm_tied_c%i_l2-%elr0.1" % (bottleneck, l2_coef)
-                net1_cfg = get_net((i_encoder1_tieing, u_encoder1_tieing),{"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum", "mode":"user_mask","l2":l2_coef})
-                train(net1_cfg, data=load_movielens10m_matrix_new(), num_epochs=30, batch_size=128, shuffle=True, mean_centering=True,model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,out_dir="output_new3/%s" % dirname)
+        for bottleneck in [ [5000] ]:
+            code_conf = ",".join([str(elem) for elem in bottleneck])
+            dirname = "hybrid_usermask_tanh_tied_c%s_lr0.1_bs1024" % code_conf
+            net1_cfg = get_net((i_encoder1_tieing, u_encoder1_tieing),
+                                   {"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":tanh, "optimiser":"nesterov_momentum", "mode":"user_mask", "n_users":data[0].shape[0], "n_items":data[0].shape[1] })
+            #train(net1_cfg, data=data, num_epochs=500, batch_size=1024, shuffle=True, mean_centering=True, model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,
+            #          out_dir="output_100k/%s" % dirname, save_model=False)
+            dump_code_layer("codes/hybrid_usermask_tanh_tied_c%s_lr0.1_bs1024.train.npy" % code_conf, net1_cfg, "user", "/storeSSD/cbeckham/log6308_models/hybrid_usermask_tanh_tied_c%s_lr0.1_bs1024/50.model" % code_conf, data[0].T, True)
+
+            
+
+
+    if "HYBRID_ITEMMASK_SIGM_TIED_BS1024_ML100K" in os.environ:
+        data=load_movielens100k_matrix_new()
+        seed = 0
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        for bottleneck in [ [600],[5000] ]:
+            code_conf = ",".join([str(elem) for elem in bottleneck])
+            dirname = "hybrid_itemmask_sigm_tied_c%s_lr0.1_bs1024" % code_conf
+            net1_cfg = get_net((i_encoder1_tieing, u_encoder1_tieing),
+                                   {"bottleneck":bottleneck, "learning_rate":0.1, "optimiser":"nesterov_momentum", "nonlinearity":rectify, "mode":"item_mask", "n_users":data[0].shape[0], "n_items":data[0].shape[1] })
+            #train(net1_cfg, data=data, num_epochs=50, batch_size=1024, shuffle=True, mean_centering=True, model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,
+            #          out_dir="output_100k/%s" % dirname)
+            dump_code_layer("codes/hybrid_itemmask_sigm_tied_c%s_lr0.1_bs1024.train.npy" % code_conf, net1_cfg, "item", "/storeSSD/cbeckham/log6308_models/hybrid_itemmask_sigm_tied_c%s_lr0.1_bs1024/50.model" % code_conf, data[0], True)
+            
+
+
+    if "HYBRID_USERMASK_SIGM_TIED_BS1024_ML100K_SIGMA01" in os.environ:
+        data=load_movielens100k_matrix_new()
+        seed = 0
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        for bottleneck in [ [100],[200],[300],[600],[1000],[5000] ]:
+            code_conf = ",".join([str(elem) for elem in bottleneck])
+            dirname = "hybrid_usermask_sigm_tied_c%s_lr0.1_bs1024_sigma0.1" % code_conf
+            net1_cfg = get_net((i_encoder1_tieing, u_encoder1_tieing),
+                    {"bottleneck":bottleneck, "learning_rate":0.1, "sigma":0.1, "optimiser":"nesterov_momentum", "nonlinearity":rectify, "mode":"user_mask", "n_users":data[0].shape[0], "n_items":data[0].shape[1] })
+            train(net1_cfg, data=data, num_epochs=50, batch_size=1024, shuffle=True, mean_centering=True, model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,
+                      out_dir="output_100k/%s" % dirname)
+
+            
+
+
+            
+    if "HYBRID_ITEMMASK_SIGM_UNTIED_BS1024_ML100K" in os.environ:
+        data=load_movielens100k_matrix_new()
+        seed = 0
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        for bottleneck in [ [10000],[50000] ]:
+            code_conf = ",".join([str(elem) for elem in bottleneck])
+            dirname = "hybrid_itemmask_sigm_untied_c%s_lr0.1_bs1024" % code_conf
+            net1_cfg = get_net((i_simple_net, u_simple_net),
+                                   {"bottleneck":bottleneck[0], "learning_rate":0.1, "optimiser":"nesterov_momentum", "nonlinearity":rectify, "mode":"item_mask", "n_users":data[0].shape[0], "n_items":data[0].shape[1] })
+            train(net1_cfg, data=data, num_epochs=50, batch_size=1024, shuffle=True, mean_centering=True, model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,
+                      out_dir="output_100k/%s" % dirname)
+
+
+            
+
+
+    if "HYBRID_USERMASK_SIGM_TIED_BS1024_ML100K_RND" in os.environ:
+        for data_seed in [0,1,2,3,4]:
+            data=load_movielens100k_matrix_new(split=True, seed=data_seed)
+            seed = 0
+            lasagne.random.set_rng( np.random.RandomState(seed) )
+            for bottleneck in [ [5000] ]:
+                code_conf = ",".join([str(elem) for elem in bottleneck])
+                dirname = "hybrid_usermask_sigm_untied_c%s_lr0.1_bs1024_rnd%i" % (code_conf, data_seed)
+                net1_cfg = get_net((i_encoder1_tieing, u_encoder1_tieing),
+                                       {"bottleneck":bottleneck, "learning_rate":0.1, "optimiser":"nesterov_momentum", "nonlinearity":rectify, "mode":"user_mask", "n_users":data[0].shape[0], "n_items":data[0].shape[1] })
+                train(net1_cfg, data=data, num_epochs=50, batch_size=1024, shuffle=True, mean_centering=True, model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,
+                          out_dir="output_100k_randomized/%s" % dirname)
+
+
+
+            
+            
+    if "HYBRID_USERMASK_SIGM_TIED_BS1024_ML1M" in os.environ:
+        data=load_movielens1m_matrix_new()
+        seed = 0
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        for bottleneck in [ [1000,1000,1000] ]:
+            code_conf = ",".join([str(elem) for elem in bottleneck])
+            dirname = "hybrid_usermask_sigm_tied_c%s_lr0.1_bs1024" % code_conf
+            net1_cfg = get_net((i_encoder1_tieing, u_encoder1_tieing),
+                                   {"bottleneck":bottleneck, "learning_rate":0.1, "optimiser":"nesterov_momentum", "mode":"user_mask", "n_users":data[0].shape[0], "n_items":data[0].shape[1] })
+            train(net1_cfg, data=data, num_epochs=50, batch_size=1024, shuffle=True, mean_centering=True, model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,
+                      out_dir="output_1m/%s" % dirname)
+
+    if "HYBRID_ITEMMASK_SIGM_TIED_BS1024_ML1M" in os.environ:
+        data=load_movielens1m_matrix_new()
+        seed = 0
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        for bottleneck in [ [100],[200],[300],[600],[1000],[5000] ]:
+            code_conf = ",".join([str(elem) for elem in bottleneck])
+            dirname = "hybrid_itemmask_sigm_tied_c%s_lr0.1_bs1024" % code_conf
+            net1_cfg = get_net((i_encoder1_tieing, u_encoder1_tieing),
+                                   {"bottleneck":bottleneck, "learning_rate":0.1, "optimiser":"nesterov_momentum", "nonlinearity":rectify, "mode":"item_mask", "n_users":data[0].shape[0], "n_items":data[0].shape[1] })
+            train(net1_cfg, data=data, num_epochs=50, batch_size=1024, shuffle=True, mean_centering=True, model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,
+                      out_dir="output_1m/%s" % dirname)
+
+            
+            
+            
+
+    if "HYBRID_USERMASK_SIGM_TIED_BS1024_L1" in os.environ:
+        seed = 0
+        lasagne.random.set_rng( np.random.RandomState(seed) )
+        data=load_movielens10m_matrix_new()
+        for l1_coef in [1e-6]:
+            for bottleneck in [[600]]:
+                code_conf = ",".join([str(elem) for elem in bottleneck])
+                dirname = "hybrid_usermask_sigm_tied_c%s_l1-%e_lr0.1_bs1024" % (code_conf, l1_coef)
+                net1_cfg = get_net((i_encoder1_tieing, u_encoder1_tieing),{"bottleneck":bottleneck, "learning_rate":0.1, "nonlinearity":sigmoid, "optimiser":"nesterov_momentum", "mode":"user_mask","l1":l1_coef, "n_users":data[0].shape[0], "n_items":data[0].shape[1]})
+                train(net1_cfg, data=data, num_epochs=30, batch_size=1024, shuffle=True, mean_centering=True,model_dir="/storeSSD/cbeckham/log6308_models/%s" % dirname,out_dir="output_new3/%s" % dirname, resume="/storeSSD/cbeckham/log6308_models/hybrid_usermask_sigm_tied_c600_l1-1.000000e-06_lr0.1_bs1024/30.model")
 
 
 
